@@ -60,6 +60,7 @@ username, and continue with Part 1 of the guide.
 | `questions.jsonl` | The 19 evaluation questions |
 | `reference/policies/` | The fictional Contoso policies. **Read CHS-POL-001 first — it is the specification your agent must satisfy.** |
 | `setup-windows.ps1` | One-time VM setup |
+| `solutions/` | Reference solutions — try it yourself first, then compare |
 
 ## Requirements
 
