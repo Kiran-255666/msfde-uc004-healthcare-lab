@@ -52,38 +52,56 @@ knowledge base, connection and agent inside it, all named after your alias.
 
 ## Part 0 · Set up (20 min)
 
-1. Sign in to your lab VM and open PowerShell **as Administrator**.
-2. Clone or copy this repository to your VM (e.g. `C:\uc004`), then:
+**1. Open PowerShell as Administrator** on your lab VM, and clone or copy this repository
+(e.g. to `C:\uc004`).
 
-   ```powershell
-   Set-ExecutionPolicy -Scope Process Bypass -Force
-   cd C:\uc004
-   .\setup-windows.ps1
-   ```
+**2. Run the setup script.**
 
-   The lab image already has Python 3.12, the Azure CLI and VS Code, so the script installs only
-   what is missing. It then creates `.venv`, installs the packages, sets UTF-8 output (the
-   clinical corpus contains characters like `≥`), and signs you in to Azure with a device code.
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass -Force
+cd C:\uc004
+.\setup-windows.ps1
+```
 
-3. Copy `.env.example` to `.env`, fill in the values from the **lab environment handout**, and
-   set your alias — lowercase letters and digits, 2–12 characters. Use your lab username so it
-   is unique:
+The lab image already has Python 3.12, the Azure CLI and VS Code, so the script installs only
+what is missing. It creates `.venv`, installs the packages, sets UTF-8 output (the clinical
+corpus is full of characters like `≥`), creates your `.env` from the template, and starts an
+Azure sign-in.
 
-   ```
-   LAB_ALIAS=fdeuser7
-   ```
+**3. Fill in your `.env`.** Open it and paste the values from the **lab environment handout**,
+then set your alias — lowercase letters and digits, 2–12 characters. Use your lab username so it
+is unique across the room:
 
-4. Activate the environment and confirm your configuration:
+```
+LAB_ALIAS=fdeuser7
+```
 
-   ```powershell
-   .\.venv\Scripts\Activate.ps1
-   python lab_config.py
-   ```
+**4. Sign in to Azure and select the subscription.** The script starts a sign-in, but the
+subscription can only be selected once `.env` has real values, so run this now:
 
-   You should see `ks-fdeuser7`, `kb-fdeuser7`, `agent-fdeuser7` and the shared endpoints.
+```powershell
+az login --use-device-code
+az account set --subscription <SUBSCRIPTION_ID from the handout>
+az account show --query "{user:user.name, subscription:name}" -o table
+```
 
-> **Checkpoint 0** — `python lab_config.py` prints your names, and `az account show` shows the
-> subscription from the handout.
+Sign in with the **lab account from your credentials sheet**, not a personal account. If
+`az login` was already completed by the setup script, you only need the `az account set` line.
+
+**5. Activate the environment and confirm your configuration.**
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+python lab_config.py
+```
+
+You should see `ks-fdeuser7`, `kb-fdeuser7`, `agent-fdeuser7` and the shared endpoints.
+
+> **Checkpoint 0** — `az account show` lists your lab account and the subscription from the
+> handout, and `python lab_config.py` prints the object names built from your alias.
+>
+> If `az account show` reports a different subscription, run the `az account set` line again —
+> the later parts will fail with confusing errors otherwise.
 
 ---
 

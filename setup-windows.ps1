@@ -83,7 +83,8 @@ if (Test-Command az) {
     if ($subscription -and $subscription -notmatch '^<') {
         az account set --subscription $subscription
     } else {
-        Write-Warning 'SUBSCRIPTION_ID is not set in .env yet. Fill in the handout values, then run: az account set --subscription <id>'
+        Write-Host '  .env still has placeholder values - that is expected on a first run.' -ForegroundColor Yellow
+        Write-Host '  After you paste in the handout values, run:  az account set --subscription <SUBSCRIPTION_ID>' -ForegroundColor Yellow
     }
     $who = az ad signed-in-user show --query userPrincipalName -o tsv
     Write-Host "  signed in as $who"
@@ -94,7 +95,12 @@ if (Test-Command az) {
 Write-Step 'Done'
 Write-Host @"
 Next steps:
-  1. Edit .env and set LAB_ALIAS to your own short name (letters and digits, e.g. priya01).
-  2. Activate the environment:  .\.venv\Scripts\Activate.ps1
-  3. Follow the lab guide from Part 1.
+  1. Open .env and paste the values from the lab environment handout.
+     Set LAB_ALIAS to your own lab username (lowercase letters and digits, e.g. fdeuser7).
+  2. Select your subscription:
+        az account set --subscription <SUBSCRIPTION_ID from the handout>
+        az account show --query "{user:user.name, subscription:name}" -o table
+  3. Activate the environment:  .\.venv\Scripts\Activate.ps1
+  4. Check it:                  python lab_config.py
+  5. Follow the lab guide from Part 1.
 "@ -ForegroundColor Green
