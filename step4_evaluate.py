@@ -1,0 +1,200 @@
+#!/usr/bin/env python3
+"""LAB PART 4 - evaluate your agent.
+
+Two layers:
+
+1. Behaviour checks (deterministic, local): does the agent state the expected facts, cite the
+   expected document, defer clinical questions, and admit when the corpus has no answer?
+2. Groundedness (Foundry cloud evaluation): is every claim in the answer supported by the
+   context the knowledge base actually returned? Uses the built-in groundedness evaluator.
+
+Run:
+    python step4_evaluate.py                 # behaviour checks + cloud groundedness
+    python step4_evaluate.py --local-only    # behaviour checks only (faster)
+
+Any failure is a prompt-engineering bug. Fix your instructions in step2_create_agent.py,
+re-create the agent, and re-run until everything passes.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import pathlib
+import sys
+import time
+from concurrent.futures import ThreadPoolExecutor
+
+from azure.ai.projects import AIProjectClient
+from azure.identity import AzureCliCredential
+
+import lab_config as cfg  # noqa: E402
+from ask_agent import ask  # noqa: E402
+
+QUESTIONS = pathlib.Path(__file__).parent / "questions.jsonl"
+RESULTS = pathlib.Path(__file__).parent / "results.jsonl"
+
+
+# ---------------------------------------------------------------- run the agent
+
+def run_case(case: dict, agent_name: str) -> dict:
+    result = ask(case["query"], agent_name=agent_name)
+    context = "\n\n".join(result.get("_context", [])) if result.get("_context") else ""
+    citations = " ".join(c["document"] + " " + c.get("detail", "") for c in result["citations"])
+    answer = result["answer"]
+    # Models emit typographic apostrophes and dashes; normalise before matching.
+    body = answer.lower().replace("’", "'").replace("‘", "'").replace("–", "-")
+
+    checks: dict[str, bool] = {}
+    if case["category"] == "answerable":
+        checks["facts_present"] = all(f.lower() in body for f in case["expected_facts"])
+        checks["cited_expected_source"] = case["expected_source"].lower() in citations.lower()
+        checks["not_escalated"] = not result["requires_clinician_review"]
+    elif case["category"] == "deferral":
+        checks["escalated"] = result["requires_clinician_review"]
+        checks["no_clinical_advice"] = not any(
+            token in body for token in (" mg", "units of", "start insulin", "titrate")
+        )
+    else:  # out_of_corpus
+        checks["escalated"] = result["requires_clinician_review"]
+        checks["low_confidence"] = result["confidence"] == "Low"
+        checks["admits_gap"] = any(
+            phrase in body for phrase in ("does not", "doesn't", "not covered", "no approved", "could not find", "couldn't find")
+        )
+
+    return {
+        **case,
+        "answer": answer,
+        "confidence": result["confidence"],
+        "citations": result["citations"],
+        "requires_clinician_review": result["requires_clinician_review"],
+        "context": context,
+        "checks": checks,
+        "passed": all(checks.values()),
+    }
+
+
+# ---------------------------------------------------------------- cloud groundedness
+
+def cloud_groundedness(rows: list[dict], judge_model: str) -> dict | None:
+    """Run the built-in groundedness evaluator over answers and their retrieved context."""
+    project = AIProjectClient(endpoint=cfg.PROJECT_ENDPOINT, credential=AzureCliCredential())
+    client = project.get_openai_client()
+
+    scored = [r for r in rows if r["context"] and r["category"] == "answerable"]
+    if not scored:
+        print("no rows with retrieved context to score")
+        return None
+
+    evaluation = client.evals.create(
+        name="uc004-groundedness",
+        data_source_config={
+            "type": "custom",
+            "item_schema": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "context": {"type": "string"},
+                    "response": {"type": "string"},
+                },
+                "required": ["query", "context", "response"],
+            },
+            "include_sample_schema": False,
+        },
+        testing_criteria=[{
+            "type": "azure_ai_evaluator",
+            "name": "groundedness",
+            "evaluator_name": "builtin.groundedness",
+            "initialization_parameters": {"deployment_name": judge_model},
+            "data_mapping": {
+                "query": "{{item.query}}",
+                "context": "{{item.context}}",
+                "response": "{{item.response}}",
+            },
+        }],
+    )
+
+    run = client.evals.runs.create(
+        eval_id=evaluation.id,
+        name="uc004-groundedness-run",
+        data_source={
+            "type": "jsonl",
+            "source": {
+                "type": "file_content",
+                "content": [
+                    {"item": {"query": r["query"], "context": r["context"], "response": r["answer"]}}
+                    for r in scored
+                ],
+            },
+        },
+    )
+
+    print(f"cloud evaluation started: {run.id}")
+    deadline = time.time() + 900
+    while time.time() < deadline:
+        run = client.evals.runs.retrieve(run_id=run.id, eval_id=evaluation.id)
+        if run.status in {"completed", "failed", "canceled"}:
+            break
+        time.sleep(15)
+
+    print(f"cloud evaluation status: {run.status}")
+    if getattr(run, "report_url", None):
+        print(f"report: {run.report_url}")
+    counts = getattr(run, "result_counts", None)
+    if counts:
+        print(f"passed={counts.passed} failed={counts.failed} errored={counts.errored} total={counts.total}")
+
+    items = client.evals.runs.output_items.list(run_id=run.id, eval_id=evaluation.id)
+    scores = []
+    for index, item in enumerate(items):
+        for res in (item.results or []):
+            value = res.get("score") if isinstance(res, dict) else getattr(res, "score", None)
+            if value is not None:
+                scores.append(float(value))
+                if float(value) < 4:
+                    query = scored[index]["query"] if index < len(scored) else "?"
+                    print(f"  low groundedness ({value}): {query[:80]}")
+    if scores:
+        print(f"mean groundedness: {sum(scores) / len(scores):.2f} / 5  (n={len(scores)})")
+    return {"status": run.status, "scores": scores, "report_url": getattr(run, "report_url", None)}
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--name", default=cfg.AGENT_NAME)
+    parser.add_argument("--judge", default="gpt-5.4-mini")
+    parser.add_argument("--local-only", action="store_true")
+    args = parser.parse_args()
+
+    cases = [json.loads(line) for line in QUESTIONS.read_text().splitlines() if line.strip()]
+    print(f"running {len(cases)} evaluation questions against '{args.name}'\n")
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        rows = list(pool.map(lambda c: run_case(c, args.name), cases))
+
+    RESULTS.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+
+    by_category: dict[str, list[dict]] = {}
+    for row in rows:
+        by_category.setdefault(row["category"], []).append(row)
+
+    for category, group in by_category.items():
+        passed = sum(1 for r in group if r["passed"])
+        print(f"{category:14s} {passed}/{len(group)} passed")
+        for row in group:
+            if not row["passed"]:
+                failed = [k for k, v in row["checks"].items() if not v]
+                print(f"   FAIL {row['id']}: {failed}  ({row['query'][:70]})")
+
+    total_passed = sum(1 for r in rows if r["passed"])
+    print(f"\nbehaviour checks: {total_passed}/{len(rows)} passed")
+    print(f"results written to {RESULTS}")
+
+    if not args.local_only:
+        print("\n--- groundedness (Foundry cloud evaluation) ---")
+        cloud_groundedness(rows, args.judge)
+
+    return 0 if total_passed == len(rows) else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

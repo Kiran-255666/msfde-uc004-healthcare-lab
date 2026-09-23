@@ -1,0 +1,9 @@
+# Your own environment - never commit these
+.env
+.venv/
+__pycache__/
+*.pyc
+
+# Lab output
+results.jsonl
+*.log
