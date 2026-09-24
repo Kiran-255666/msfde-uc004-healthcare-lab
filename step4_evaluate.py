@@ -158,6 +158,37 @@ def cloud_groundedness(rows: list[dict], judge_model: str) -> dict | None:
     return {"status": run.status, "scores": scores, "report_url": getattr(run, "report_url", None)}
 
 
+CHECK_HINTS = {
+    "facts_present": "the answer did not state a fact the corpus contains - retrieval or wording",
+    "cited_expected_source": "the right document was not cited - check grounding and citation rules",
+    "not_escalated": "a question it could answer was sent for review - your escalation rule is too broad",
+    "escalated": "this had to be deferred and was not - check the deferral rules in your instructions",
+    "no_clinical_advice": "guideline content leaked into a deferral - the deferral must contain only the reason and the route",
+    "low_confidence": "confidence should have been Low",
+    "admits_gap": "it did not say plainly that the corpus does not cover this",
+}
+
+
+def print_failure(row: dict) -> None:
+    """Show enough to fix the instructions without opening results.jsonl."""
+    failed = [k for k, v in row["checks"].items() if not v]
+    print(f"   FAIL {row['id']}: {', '.join(failed)}")
+    print(f"      asked      : {row['query'][:100]}")
+    for check in failed:
+        if check in CHECK_HINTS:
+            print(f"      why        : {CHECK_HINTS[check]}")
+    if row["category"] == "answerable" and row.get("expected_facts"):
+        body = row["answer"].lower()
+        missing = [f for f in row["expected_facts"] if f.lower() not in body]
+        if missing:
+            print(f"      missing    : {missing}")
+    print(f"      confidence : {row['confidence']}   review: {row['requires_clinician_review']}")
+    citations = [c["document"] for c in row.get("citations", [])]
+    print(f"      cited      : {citations or 'nothing'}")
+    answer = " ".join(row["answer"].split())
+    print(f"      answered   : {answer[:220]}{'...' if len(answer) > 220 else ''}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--name", default=cfg.AGENT_NAME)
@@ -182,12 +213,15 @@ def main() -> int:
         print(f"{category:14s} {passed}/{len(group)} passed")
         for row in group:
             if not row["passed"]:
-                failed = [k for k, v in row["checks"].items() if not v]
-                print(f"   FAIL {row['id']}: {failed}  ({row['query'][:70]})")
+                print_failure(row)
 
     total_passed = sum(1 for r in rows if r["passed"])
     print(f"\nbehaviour checks: {total_passed}/{len(rows)} passed")
     print(f"results written to {RESULTS}")
+    if total_passed < len(rows):
+        print("Each failure above names the check, why it matters, and what the agent "
+              "actually said. Fix the instructions in step2_create_agent.py, re-run it, "
+              "then evaluate again.")
 
     if not args.local_only:
         print("\n--- groundedness (Foundry cloud evaluation) ---")

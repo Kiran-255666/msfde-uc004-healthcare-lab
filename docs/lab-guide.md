@@ -265,8 +265,12 @@ python step4_evaluate.py                   # adds Foundry cloud groundedness
 base actually returned*, scoring 1–5. The run prints a report URL you can open in the Foundry
 portal.
 
-Every failure is a prompt-engineering bug. Fix your instructions, re-run `step2_create_agent.py`,
-and evaluate again.
+Every failure is a prompt-engineering bug. Each one prints the check that failed, why it
+matters, what the agent actually answered, what it cited, and any expected fact that was
+missing — so you can usually fix it without opening anything else. The full detail for every
+question, including the retrieved context, is in `results.jsonl`.
+
+Fix your instructions, re-run `step2_create_agent.py`, and evaluate again.
 
 > **Checkpoint 4** — 19/19 behaviour checks pass and mean groundedness is ≥ 4.5 / 5. Keep the
 > report URL for your defence.
