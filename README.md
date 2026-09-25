@@ -61,6 +61,16 @@ username, and continue with Part 1 of the guide.
 | `reference/policies/` | The fictional Contoso policies. **Read CHS-POL-001 first — it is the specification your agent must satisfy.** |
 | `setup-windows.ps1` | One-time VM setup |
 | `solutions/` | Reference solutions — try it yourself first, then compare |
+| `extensions/` | Seven deeper challenges for when the core lab is done |
+
+## Finished the lab?
+
+The core lab gets you a working, grounded, evaluated assistant. **[extensions/](extensions/README.md)**
+takes it from *working* to *defensible* — seven independent challenges covering retrieval tuning,
+red-teaming, citation verification, cost and latency, confidence calibration and conflicting
+policy versions. Each has an acceptance test, so you finish with evidence rather than an assertion.
+
+Nobody is expected to do all seven. Pick the ones you would want to be asked about.
 
 ## Requirements
 

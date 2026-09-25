@@ -7,3 +7,6 @@ __pycache__/
 # Lab output
 results.jsonl
 *.log
+
+# macOS
+.DS_Store
