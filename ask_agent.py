@@ -12,6 +12,7 @@ from typing import Any
 
 from azure.ai.projects import AIProjectClient
 from azure.identity import AzureCliCredential
+from openai import BadRequestError
 
 import lab_config as cfg
 
@@ -47,7 +48,26 @@ _FAIL_CLOSED = {
 def ask(question: str, agent_name: str | None = None) -> dict[str, Any]:
     project = AIProjectClient(endpoint=cfg.PROJECT_ENDPOINT, credential=AzureCliCredential())
     client = project.get_openai_client(agent_name=agent_name or cfg.AGENT_NAME)
-    response = client.responses.create(input=question)
+
+    try:
+        response = client.responses.create(input=question)
+    except BadRequestError as exc:
+        # The platform content filter can block a prompt before the agent ever sees it -
+        # jailbreak detection fires on instruction-override attempts, for example. That is a
+        # refusal, not a crash: report it and fail closed.
+        if "content_filter" not in str(exc):
+            raise
+        return {
+            "answer": "The platform content filter blocked this request before it reached the agent.",
+            "confidence": "Low",
+            "citations": [],
+            "requires_clinician_review": True,
+            "review_reason": "Blocked by the Azure OpenAI content filter.",
+            "_context": [],
+            "_telemetry": {"response_id": None, "contract_parsed": False,
+                           "knowledge_base_calls": 0, "input_tokens": None,
+                           "output_tokens": None, "blocked_by_content_filter": True},
+        }
 
     text = response.output_text or ""
     try:
